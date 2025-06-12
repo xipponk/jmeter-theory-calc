@@ -1,0 +1,4 @@
+TestCase,Threads,RampUp_s,Duration_s,ThinkTime_ms,TheoreticalMaxRPS,ActualRPS,TheoreticalTotalRequests,ActualTotalRequests,TheoreticalDuration_s,ActualDuration_s,Efficiency_pct
+Light,100,10,60,1000,100,92.44,6500,5440,70,58.85,92.44
+Medium,500,20,90,500,1000,887.87,100000,79444,110,89.48,88.79
+Stress,3000,30,120,0.01,300000,5366.25,40500000,1033030.4,150,194.2,1.79

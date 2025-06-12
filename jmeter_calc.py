@@ -1,27 +1,38 @@
 import matplotlib.pyplot as plt
 
 def calculate_theoretical_values(threads, ramp_up, duration, think_time_ms):
-    # ป้องกัน think_time เป็น 0 เพื่อหลีกเลี่ยงการหารด้วยศูนย์
-    think_time = think_time_ms / 1000.0 if think_time_ms > 0 else 0.001
+    # ปรับปรุงการจัดการ think_time:
+    # ถ้า think_time_ms เป็น 0, เราจะใช้ค่าขั้นต่ำที่สมเหตุสมผลสำหรับเวลาประมวลผลต่อ Request
+    # เพราะ JMeter ไม่สามารถส่ง Request ได้เร็วกว่า Overhead ของตัวเอง
+    if think_time_ms > 0:
+        interval_per_user = think_time_ms / 1000.0 # แปลง ms เป็นวินาที
+    else:
+        # เมื่อ think_time_ms เป็น 0 (Stress Test Mode)
+        # กำหนดเวลาขั้นต่ำที่ JMeter ใช้ในการประมวลผล 1 Request (เช่น 10ms หรือ 5ms)
+        # ค่านี้จะสะท้อนถึง Overhead ของ JMeter และการตอบสนองที่เร็วที่สุดจาก Server
+        min_processing_time_ms = 10 # 10 ms = 0.01 seconds
+        interval_per_user = min_processing_time_ms / 1000.0
 
-    # RPS สูงสุดที่ทำได้ (เมื่อมีผู้ใช้งานเต็มจำนวนและไม่มีเวลาคิด)
-    max_rps = threads / think_time
+    # RPS สูงสุดที่ทำได้ (เมื่อมีผู้ใช้งานเต็มจำนวนและไม่มีเวลาคิดเพิ่มเติม)
+    max_rps = threads / interval_per_user
+    
     # จำนวน requests ในช่วง ramp-up (โดยประมาณ)
-    requests_during_ramp_up = (0.5 * threads / think_time) * ramp_up
+    # ใช้ค่าเฉลี่ยของ user ในช่วง ramp-up (threads / 2)
+    requests_during_ramp_up = (threads / 2) / interval_per_user * ramp_up
     
     # จำนวน requests ในช่วง duration
-    requests_during_duration = (threads / think_time) * duration
+    requests_during_duration = (threads / interval_per_user) * duration
     
     total_requests = requests_during_ramp_up + requests_during_duration
 
-    interval_per_user = think_time # เวลาที่แต่ละ user ใช้ในการทำ 1 request (รวมคิดเวลา)
+    # ค่าอื่นๆ ที่เกี่ยวข้อง
     load_intensity = max_rps # อัตราโหลดสูงสุด (RPS)
     ramp_up_gradient = threads / ramp_up if ramp_up > 0 else threads # อัตราการเพิ่มผู้ใช้งานต่อวินาที
-    total_simulation_time = ramp_up + duration
+    total_simulation_time = ramp_up + duration # ระยะเวลารวมของ Test (ramp-up + duration)
 
     return {
         "max_rps": max_rps,
-        "total_requests_approx": total_requests, # เปลี่ยนชื่อให้ชัดเจนว่าเป็นค่าประมาณ
+        "total_requests_approx": total_requests,
         "interval_per_user": interval_per_user,
         "load_intensity": load_intensity,
         "ramp_up_gradient": ramp_up_gradient,
@@ -30,21 +41,24 @@ def calculate_theoretical_values(threads, ramp_up, duration, think_time_ms):
 
 
 def plot_traffic_pattern(threads, ramp_up, duration, think_time_ms):
-    think_time = think_time_ms / 1000.0 if think_time_ms > 0 else 0.001
+    # ใช้ Logic เดียวกันกับ calculate_theoretical_values สำหรับ think_time
+    if think_time_ms > 0:
+        think_time_sec_for_plot = think_time_ms / 1000.0
+    else:
+        min_processing_time_ms = 10 # ต้องสอดคล้องกับ calculate_theoretical_values
+        think_time_sec_for_plot = min_processing_time_ms / 1000.0
     
     # กำหนดช่วงเวลาที่การทดสอบทำงาน (รวม ramp-up และ duration)
     # และเพิ่มเวลาสำหรับช่วง tear-down เพื่อให้กราฟลดลงถึง 0
-    # กำหนด tear-down time ให้เท่ากับ ramp-up time เพื่อให้สมมาตร
-    tear_down_time = ramp_up 
-    total_simulation_time = ramp_up + duration + tear_down_time
+    tear_down_time = ramp_up # กำหนด tear-down time ให้เท่ากับ ramp-up time เพื่อให้สมมาตร
+    total_simulation_time_for_plot = ramp_up + duration + tear_down_time
 
     time_series = []
     rps_series = []
     user_series = []
 
     time_resolution = 0.5 # ความละเอียดของเวลาในการพล็อต (วินาที)
-    # คำนวณจำนวนขั้นตอนทั้งหมด
-    total_steps = int(total_simulation_time / time_resolution) + 1
+    total_steps = int(total_simulation_time_for_plot / time_resolution) + 1
 
     for t in range(total_steps):
         current_time = t * time_resolution
@@ -52,22 +66,21 @@ def plot_traffic_pattern(threads, ramp_up, duration, think_time_ms):
         active_users = 0
         if current_time <= ramp_up:
             # ช่วง Ramp-up: ผู้ใช้งานเพิ่มขึ้นจาก 0 ถึง Threads
-            active_users = int(threads * (current_time / ramp_up))
+            active_users = int(threads * (current_time / ramp_up)) if ramp_up > 0 else threads
         elif current_time <= ramp_up + duration:
             # ช่วงคงที่: ผู้ใช้งานคงที่ที่จำนวน Threads สูงสุด
             active_users = threads
         elif current_time <= ramp_up + duration + tear_down_time:
             # ช่วง Tear-down: ผู้ใช้งานลดลงจาก Threads ถึง 0
-            # คำนวณสัดส่วนการลดลง
             time_in_tear_down = current_time - (ramp_up + duration)
-            active_users = int(threads * (1 - (time_in_tear_down / tear_down_time)))
+            active_users = int(threads * (1 - (time_in_tear_down / tear_down_time))) if tear_down_time > 0 else 0
             active_users = max(0, active_users) # ให้แน่ใจว่าไม่ติดลบ
         else:
             # หลังจากการทดสอบสิ้นสุด: ผู้ใช้งานเป็น 0
             active_users = 0
 
-        # คำนวณ RPS จาก Active Users และ Think Time
-        rps = active_users / think_time
+        # คำนวณ RPS จาก Active Users และ Think Time ที่ปรับปรุงแล้ว
+        rps = active_users / think_time_sec_for_plot
         
         time_series.append(current_time)
         rps_series.append(rps)
